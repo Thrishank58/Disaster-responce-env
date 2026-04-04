@@ -10,7 +10,7 @@ from grader import grade
 
 API_BASE_URL = os.getenv("API_BASE_URL", "https://api.openai.com/v1")
 MODEL_NAME = os.getenv("MODEL_NAME", "gpt-4o-mini")
-API_KEY = os.getenv("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")
+API_KEY = os.getenv("OPENAI_API_KEY")
 
 client = OpenAI(api_key=API_KEY, base_url=API_BASE_URL)
 
@@ -124,6 +124,7 @@ async def run_task(task_module, task_name):
 
 async def main():
     tasks = [
+        
         (easy, "easy"),
         (medium, "medium"),
         (hard, "hard")
