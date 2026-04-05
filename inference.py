@@ -23,7 +23,7 @@ async def run(task):
         if result["done"]:
             break
 
-    final_state = result["observation"].dict()
+    final_state = result["observation"].model_dump()
     score = grade(final_state)
     print(f"Final score: {score}")
 
