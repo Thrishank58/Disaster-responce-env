@@ -1,40 +1,58 @@
-from fastapi import FastAPI
-from env import DisasterEnv
-import tasks.easy as easy_task
-import tasks.medium as medium_task
-import tasks.hard as hard_task
+import streamlit as st
+from pdf_reader import read_pdf
+from ocr_reader import read_image
+from llm import explain_text, followup_chat
 
-app = FastAPI()
+# ---- Load CSS ----
+def load_css():
+    with open("style.css") as f:
+        st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
 
-@app.get("/")
-async def root():
-    return {"message": "Disaster Response Env Running"}
+load_css()
 
-@app.get("/health")
-async def health():
-    return {"status": "ok"}
+st.set_page_config(page_title="Medical AI Tutor", layout="wide")
 
-@app.get("/run/easy")
-async def run_easy():
-    env = DisasterEnv(easy_task)
-    result = await env.reset()
-    return {"observation": result["observation"].dict()}
+st.title("🩺 Medical AI Tutor")
+st.warning("⚠️ Educational use only. Not for diagnosis or treatment.")
 
-@app.get("/run/medium")
-async def run_medium():
-    env = DisasterEnv(medium_task)
-    result = await env.reset()
-    return {"observation": result["observation"].dict()}
+# ---- Session memory ----
+if "context" not in st.session_state:
+    st.session_state.context = ""
 
-@app.get("/run/hard")
-async def run_hard():
-    env = DisasterEnv(hard_task)
-    result = await env.reset()
-    return {"observation": result["observation"].dict()}
+# ---- Layout ----
+col1, col2 = st.columns([1, 2])
 
-def main():
-    import uvicorn
-    uvicorn.run("server.app:app", host="0.0.0.0", port=7860)
+with col1:
+    st.subheader("📄 Upload File")
+    uploaded_file = st.file_uploader(
+        "Upload PDF or Image",
+        type=["pdf", "png", "jpg", "jpeg"]
+    )
 
-if __name__ == "__main__":
-    main()
+    explain_btn = st.button("🧠 Explain Like a Tutor")
+
+with col2:
+    st.subheader("📚 Explanation")
+
+    if uploaded_file and explain_btn:
+        with st.spinner("AI tutor is explaining…"):
+            if uploaded_file.type == "application/pdf":
+                text = read_pdf(uploaded_file)
+            else:
+                text = read_image(uploaded_file)
+
+            explanation = explain_text(text)
+            st.session_state.context = explanation
+            st.write(explanation)
+
+# ---- Follow-up chat ----
+if st.session_state.context:
+    st.markdown("---")
+    st.subheader("💬 Ask a Follow-up Question")
+
+    question = st.text_input("Ask anything about this topic")
+
+    if st.button("Ask"):
+        with st.spinner("Thinking like a tutor…"):
+            answer = followup_chat(st.session_state.context, question)
+        st.write(answer)
