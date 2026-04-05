@@ -49,3 +49,10 @@ async def step(action: Action):
 async def state():
     obs = await active_env.state()
     return {"observation": obs.model_dump()}
+
+def main():
+    import uvicorn
+    uvicorn.run("server.app:app", host="0.0.0.0", port=7860)
+
+if __name__ == "__main__":
+    main()
