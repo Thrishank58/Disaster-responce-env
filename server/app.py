@@ -1,58 +1,51 @@
-import streamlit as st
-from pdf_reader import read_pdf
-from ocr_reader import read_image
-from llm import explain_text, followup_chat
+from fastapi import FastAPI
+from env import DisasterEnv
+from models import Action
+import tasks.easy as easy_task
+import tasks.medium as medium_task
+import tasks.hard as hard_task
 
-# ---- Load CSS ----
-def load_css():
-    with open("style.css") as f:
-        st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
+app = FastAPI(title="Disaster Response Env")
 
-load_css()
+envs = {
+    "easy":   DisasterEnv(easy_task),
+    "medium": DisasterEnv(medium_task),
+    "hard":   DisasterEnv(hard_task),
+}
 
-st.set_page_config(page_title="Medical AI Tutor", layout="wide")
+active_env = envs["easy"]
 
-st.title("🩺 Medical AI Tutor")
-st.warning("⚠️ Educational use only. Not for diagnosis or treatment.")
+@app.get("/")
+async def root():
+    return {"message": "Disaster Response Env is running"}
 
-# ---- Session memory ----
-if "context" not in st.session_state:
-    st.session_state.context = ""
+@app.get("/health")
+async def health():
+    return {"status": "ok"}
 
-# ---- Layout ----
-col1, col2 = st.columns([1, 2])
+@app.post("/reset")
+async def reset(task: str = "easy"):
+    global active_env
+    active_env = envs.get(task, envs["easy"])
+    result = await active_env.reset()
+    return {
+        "observation": result["observation"].model_dump(),
+        "reward": result["reward"],
+        "done": result["done"],
+        "info": result["info"],
+    }
 
-with col1:
-    st.subheader("📄 Upload File")
-    uploaded_file = st.file_uploader(
-        "Upload PDF or Image",
-        type=["pdf", "png", "jpg", "jpeg"]
-    )
+@app.post("/step")
+async def step(action: Action):
+    result = await active_env.step(action)
+    return {
+        "observation": result["observation"].model_dump(),
+        "reward": result["reward"],
+        "done": result["done"],
+        "info": result["info"],
+    }
 
-    explain_btn = st.button("🧠 Explain Like a Tutor")
-
-with col2:
-    st.subheader("📚 Explanation")
-
-    if uploaded_file and explain_btn:
-        with st.spinner("AI tutor is explaining…"):
-            if uploaded_file.type == "application/pdf":
-                text = read_pdf(uploaded_file)
-            else:
-                text = read_image(uploaded_file)
-
-            explanation = explain_text(text)
-            st.session_state.context = explanation
-            st.write(explanation)
-
-# ---- Follow-up chat ----
-if st.session_state.context:
-    st.markdown("---")
-    st.subheader("💬 Ask a Follow-up Question")
-
-    question = st.text_input("Ask anything about this topic")
-
-    if st.button("Ask"):
-        with st.spinner("Thinking like a tutor…"):
-            answer = followup_chat(st.session_state.context, question)
-        st.write(answer)
+@app.get("/state")
+async def state():
+    obs = await active_env.state()
+    return {"observation": obs.model_dump()}
