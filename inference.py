@@ -1,41 +1,31 @@
-import os
 import asyncio
-import json
-import importlib.util
 from openai import OpenAI
 from env import DisasterEnv
 from grader import grade
+import tasks.easy as easy
+import tasks.medium as medium
+import tasks.hard as hard
 
+async def run(task):
+    env = DisasterEnv(task)
+    result = await env.reset()
+    print("Initial observation:", result["observation"])
 
-# 🔥 FIND BASE DIRECTORY AUTOMATICALLY
-def find_base_dir():
-    current = os.getcwd()
+    for _ in range(task.max_steps):
+        from models import Action
+        action = Action(
+            allocate_rescue={"A": 2},
+            send_food={"A": 10},
+            send_medical={"A": 5}
+        )
+        result = await env.step(action)
+        print(f"Step reward: {result['reward']}, Done: {result['done']}")
+        if result["done"]:
+            break
 
-    # check current + one level down
-    if os.path.exists(os.path.join(current, "tasks")):
-        return current
+    final_state = result["observation"].dict()
+    score = grade(final_state)
+    print(f"Final score: {score}")
 
-    for folder in os.listdir(current):
-        possible = os.path.join(current, folder)
-        if os.path.isdir(possible) and os.path.exists(os.path.join(possible, "tasks")):
-            return possible
-
-    raise Exception("tasks folder not found")
-
-
-BASE_DIR = find_base_dir()
-
-
-# 🔥 SAFE MODULE LOADER
-def load_module(name, relative_path):
-    full_path = os.path.join(BASE_DIR, relative_path)
-    spec = importlib.util.spec_from_file_location(name, full_path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-# 🔥 LOAD TASKS
-easy = load_module("easy", "tasks/easy.py")
-medium = load_module("medium", "tasks/medium.py")
-hard = load_module("hard", "tasks/hard.py")
+if __name__ == "__main__":
+    asyncio.run(run(easy))
