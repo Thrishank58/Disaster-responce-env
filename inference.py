@@ -1,18 +1,30 @@
-import sys
 import os
-
-sys.path.insert(0, "/app")
-
+import sys
 import asyncio
 import json
-import importlib
+import importlib.util
 from openai import OpenAI
 from env import DisasterEnv
 from grader import grade
 
-easy = importlib.import_module("tasks.easy")
-medium = importlib.import_module("tasks.medium")
-hard = importlib.import_module("tasks.hard")
+# 🔥 FORCE BASE PATH (extra safety)
+BASE_DIR = os.getcwd()
+
+
+# 🔥 UNIVERSAL MODULE LOADER (WORKS ANYWHERE)
+def load_module(name, relative_path):
+    full_path = os.path.join(BASE_DIR, relative_path)
+    spec = importlib.util.spec_from_file_location(name, full_path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+# 🔥 LOAD TASKS WITHOUT IMPORT ISSUES
+easy = load_module("easy", "tasks/easy.py")
+medium = load_module("medium", "tasks/medium.py")
+hard = load_module("hard", "tasks/hard.py")
+
 
 # API config
 API_BASE_URL = os.getenv("API_BASE_URL", "https://api.openai.com/v1")
@@ -41,24 +53,17 @@ def get_action_from_model(observation):
         response = client.chat.completions.create(
             model=MODEL_NAME,
             messages=[
-                {
-                    "role": "system",
-                    "content": "You are an AI disaster response coordinator."
-                },
-                {
-                    "role": "user",
-                    "content": f"State:\n{json.dumps(observation, indent=2)}\nReturn JSON action."
-                }
+                {"role": "system", "content": "You are an AI disaster response coordinator."},
+                {"role": "user", "content": f"State:\n{json.dumps(observation, indent=2)}\nReturn JSON action."}
             ],
             temperature=0.3,
         )
 
         text = response.choices[0].message.content.strip()
-        action = json.loads(text)
-        return action
+        return json.loads(text)
 
     except Exception:
-        # 🔥 SMART FALLBACK LOGIC
+        # 🔥 FALLBACK LOGIC
         action = {
             "allocate_rescue": {},
             "send_food": {},
@@ -76,17 +81,11 @@ def get_action_from_model(observation):
             priority = injured + (flood * 10)
 
             if priority > 150:
-                rescue = 2
-                food = 5
-                medical = 4
+                rescue, food, medical = 2, 5, 4
             elif priority > 80:
-                rescue = 1
-                food = 4
-                medical = 3
+                rescue, food, medical = 1, 4, 3
             else:
-                rescue = 1
-                food = 2
-                medical = 1
+                rescue, food, medical = 1, 2, 1
 
             if access == "road_blocked":
                 rescue = max(0, rescue - 1)
@@ -108,24 +107,19 @@ async def run_task(task_module, task_name):
         obs = result["observation"].model_dump()
 
         action_dict = get_action_from_model(obs)
-
         action_obj = type("Action", (), action_dict)()
 
         result = await env.step(action_obj)
 
-        reward = result["reward"]
-        done = result["done"]
+        log_step(step, action_dict, result["reward"], result["done"])
 
-        log_step(step, action_dict, reward, done)
-
-        if done:
+        if result["done"]:
             break
 
     final_state = (await env.state()).model_dump()
     score = grade(final_state)
 
     log_end(task_name, score)
-
     return score
 
 
