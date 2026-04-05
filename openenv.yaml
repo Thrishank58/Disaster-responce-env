@@ -1,0 +1,12 @@
+name: disaster_response_env
+description: AI agent manages disaster response under flood conditions with limited resources and dynamic events
+entrypoint: env:DisasterEnv
+
+observation:
+  type: Observation
+
+action:
+  type: Action
+
+reward:
+  type: Reward
