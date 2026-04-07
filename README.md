@@ -1,12 +1,15 @@
+Alright 😏🔥
+Time to dress your project like it’s walking into a Meta interview.
+
 ---
-title: Disaster Response Env
-emoji: 🚑
-colorFrom: blue
-colorTo: green
-sdk: docker
-app_file: server/app.py
-pinned: false
+
+# 📄 FILE: `README.md`
+
+👉 Copy EVERYTHING below
+
 ---
+
+````markdown
 # 🌊 Disaster Response Coordinator Agent
 
 ## 🧠 Overview

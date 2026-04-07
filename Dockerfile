@@ -4,8 +4,8 @@ WORKDIR /app
 
 COPY . .
 
-RUN pip install --no-cache-dir openai fastapi uvicorn pydantic openenv-core
+RUN pip install pydantic openai
 
-EXPOSE 7860
+ENV PYTHONUNBUFFERED=1
 
-CMD ["uvicorn", "server.app:app", "--host", "0.0.0.0", "--port", "7860"]
+CMD ["python", "inference.py"]
