@@ -1,144 +1,172 @@
 import asyncio
 import os
 import json
+from typing import List, Optional
+
 from openai import OpenAI
+
 from env import DisasterEnv
-import tasks.easy as easy
-import tasks.medium as medium
-import tasks.hard as hard
+from models import Action
 from grader import grade
+import tasks.easy as easy_task
+import tasks.medium as medium_task
+import tasks.hard as hard_task
 
+# ── ENV VARS ────────────────────────────────────────────────────────────────
+API_KEY      = os.getenv("HF_TOKEN") or os.getenv("OPENAI_API_KEY") or os.getenv("API_KEY", "no-key")
 API_BASE_URL = os.getenv("API_BASE_URL", "https://api.openai.com/v1")
-MODEL_NAME = os.getenv("MODEL_NAME", "gpt-4o-mini")
-API_KEY = os.getenv("OPENAI_API_KEY")
+MODEL_NAME   = os.getenv("MODEL_NAME", "gpt-4o-mini")
+LOCAL_IMAGE_NAME = os.getenv("LOCAL_IMAGE_NAME")
+BENCHMARK    = "disaster-response-env"
 
-client = OpenAI(api_key=API_KEY, base_url=API_BASE_URL)
+# ── LOGGING ─────────────────────────────────────────────────────────────────
+def log_start(task: str, env: str, model: str):
+    print(f"[START] task={task} env={env} model={model}", flush=True)
 
-MAX_STEPS = 15
+def log_step(step: int, action: str, reward: float, done: bool, error: Optional[str]):
+    error_val = error if error else "null"
+    print(f"[STEP] step={step} action={action} reward={reward:.2f} done={str(done).lower()} error={error_val}", flush=True)
 
+def log_end(success: bool, steps: int, score: float, rewards: List[float]):
+    rewards_str = ",".join(f"{r:.2f}" for r in rewards)
+    print(f"[END] success={str(success).lower()} steps={steps} score={score:.3f} rewards={rewards_str}", flush=True)
 
-def log_start(task_name):
-    print(f"[START] {task_name}", flush=True)
+# ── LLM CALL ────────────────────────────────────────────────────────────────
+def get_action(client: OpenAI, observation: dict) -> Action:
+    zones = observation.get("zones", [])
+    resources = observation.get("resources", {})
+    zone_ids = [z["id"] for z in zones]
 
+    zone_summary = "\n".join(
+        f"  Zone {z['id']}: population={z['population']}, injured={z['injured']}, "
+        f"flood_level={z['flood_level']}, access={z['access']}"
+        for z in zones
+    )
 
-def log_step(step, action, reward, done):
-    print(f"[STEP] step={step} action={action} reward={reward:.2f} done={done}", flush=True)
+    prompt = f"""You are an AI disaster response coordinator.
 
+Current situation:
+{zone_summary}
 
-def log_end(task_name, score):
-    print(f"[END] {task_name} score={score:.2f}", flush=True)
+Available resources:
+  rescue_teams={resources.get('rescue_teams', 0)}
+  food_units={resources.get('food_units', 0)}
+  medical_kits={resources.get('medical_kits', 0)}
 
+Allocate resources across zones to minimize injuries and maximize survival.
+Respond ONLY with a valid JSON object with these exact keys:
+{{
+  "allocate_rescue": {{"ZONE_ID": int, ...}},
+  "send_food": {{"ZONE_ID": int, ...}},
+  "send_medical": {{"ZONE_ID": int, ...}}
+}}
+Zone IDs are: {zone_ids}. No explanation, just JSON."""
 
-def get_action_from_model(observation):
     try:
-        response = client.chat.completions.create(
+        completion = client.chat.completions.create(
             model=MODEL_NAME,
-            messages=[
-                {
-                    "role": "system",
-                    "content": "You are an AI disaster response coordinator."
-                },
-                {
-                    "role": "user",
-                    "content": f"State:\n{json.dumps(observation, indent=2)}\nReturn JSON action."
-                }
-            ],
-            temperature=0.3,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.2,
+            max_tokens=300,
+            stream=False,
         )
-
-        text = response.choices[0].message.content.strip()
-        action = json.loads(text)
-        return action
-
-    except Exception:
-        # 🔥 SMART FALLBACK LOGIC (multi-zone aware)
-        action = {
-            "allocate_rescue": {},
-            "send_food": {},
-            "send_medical": {}
-        }
-
-        zones = observation.get("zones", [])
-
-        for zone in zones:
-            zid = zone["id"]
-            injured = zone["injured"]
-            flood = zone["flood_level"]
-            access = zone["access"]
-
-            priority = injured + (flood * 10)
-
-            if priority > 150:
-                rescue = 2
-                food = 5
-                medical = 4
-            elif priority > 80:
-                rescue = 1
-                food = 4
-                medical = 3
-            else:
-                rescue = 1
-                food = 2
-                medical = 1
-
-            if access == "road_blocked":
-                rescue = max(0, rescue - 1)
-
-            action["allocate_rescue"][zid] = rescue
-            action["send_food"][zid] = food
-            action["send_medical"][zid] = medical
-
-        return action
+        text = (completion.choices[0].message.content or "").strip()
+        text = text.replace("```json", "").replace("```", "").strip()
+        data = json.loads(text)
+        return Action(
+            allocate_rescue=data.get("allocate_rescue", {}),
+            send_food=data.get("send_food", {}),
+            send_medical=data.get("send_medical", {}),
+        )
+    except Exception as e:
+        print("LLM ERROR:", e)
+        return rule_based_action(observation)
 
 
-async def run_task(task_module, task_name):
+# ── FALLBACK LOGIC ──────────────────────────────────────────────────────────
+def rule_based_action(observation: dict) -> Action:
+    zones = observation.get("zones", [])
+    resources = observation.get("resources", {})
+    n = max(len(zones), 1)
+
+    rescue  = resources.get("rescue_teams", 0)
+    food    = resources.get("food_units", 0)
+    medical = resources.get("medical_kits", 0)
+
+    allocate_rescue, send_food, send_medical = {}, {}, {}
+    for z in zones:
+        zid = z["id"]
+        allocate_rescue[zid] = max(1, rescue // n)
+        send_food[zid]       = max(1, food // n)
+        send_medical[zid]    = max(1, medical // n)
+
+    return Action(
+        allocate_rescue=allocate_rescue,
+        send_food=send_food,
+        send_medical=send_medical,
+    )
+
+
+# ── RUN ONE TASK ─────────────────────────────────────────────────────────────
+async def run_task(client: OpenAI, task_module, task_name: str):
     env = DisasterEnv(task_module)
-    result = await env.reset()
+    rewards: List[float] = []
+    steps_taken = 0
+    score = 0.0
+    success = False
 
-    log_start(task_name)
+    log_start(task=task_name, env=BENCHMARK, model=MODEL_NAME)
 
-    for step in range(1, MAX_STEPS + 1):
-        obs = result["observation"].model_dump()
+    try:
+        result = await env.reset()
 
-        action_dict = get_action_from_model(obs)
+        for step in range(1, task_module.max_steps + 1):
+            if result["done"]:
+                break
 
-        action_obj = type("Action", (), action_dict)()
+            obs_dict = result["observation"].model_dump()
+            action = get_action(client, obs_dict)
+            action_str = f"rescue={action.allocate_rescue} food={action.send_food} medical={action.send_medical}"
 
-        result = await env.step(action_obj)
+            result = await env.step(action)
 
-        reward = result["reward"]
-        done = result["done"]
+            reward = result["reward"]
+            done   = result["done"]
+            rewards.append(reward)
+            steps_taken = step
 
-        log_step(step, action_dict, reward, done)
+            log_step(step=step, action=action_str, reward=reward, done=done, error=None)
 
-        if done:
-            break
+            if done:
+                break
 
-    final_state = (await env.state()).model_dump()
-    score = grade(final_state)
+        final_state = result["observation"].model_dump()
+        score = grade(final_state)
+        score = max(0.0, min(1.0, score))
+        success = score >= 0.5
 
-    log_end(task_name, score)
+    except Exception as e:
+        log_step(step=steps_taken + 1, action="error", reward=0.0, done=True, error=str(e))
+
+    finally:
+        log_end(success=success, steps=steps_taken, score=score, rewards=rewards)
 
     return score
 
 
+# ── MAIN ─────────────────────────────────────────────────────────────────────
 async def main():
-    tasks = [
-        
-        (easy, "easy"),
-        (medium, "medium"),
-        (hard, "hard")
+    client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
+
+    all_tasks = [
+        (easy_task,   "easy"),
+        (medium_task, "medium"),
+        (hard_task,   "hard"),
     ]
 
-    scores = []
-
-    for task_module, name in tasks:
-        score = await run_task(task_module, name)
-        scores.append(score)
-
-    avg_score = sum(scores) / len(scores)
-
-    print(f"\n[FINAL] Average Score: {avg_score:.2f}")
+    for task_module, task_name in all_tasks:
+        await run_task(client, task_module, task_name)
+        print("", flush=True)
 
 
 if __name__ == "__main__":
