@@ -23,7 +23,7 @@ if HF_TOKEN is None:
 BENCHMARK = "disaster-response-env"
 
 
-# ── LOGGING ─────────────────────────────────────────
+# ── LOGGING ───────────────────────────────
 def log_start(task, env, model):
     print(f"[START] task={task} env={env} model={model}", flush=True)
 
@@ -37,13 +37,10 @@ def log_step(step, action, reward, done, error):
 
 def log_end(success, steps, rewards):
     rewards_str = ",".join(f"{r:.2f}" for r in rewards)
-    print(
-        f"[END] success={str(success).lower()} steps={steps} rewards={rewards_str}",
-        flush=True,
-    )
+    print(f"[END] success={str(success).lower()} steps={steps} rewards={rewards_str}", flush=True)
 
 
-# ── NORMALIZE OBS ───────────────────────────────────
+# ── NORMALIZE OBS ─────────────────────────
 def normalize_obs(raw):
     if isinstance(raw, dict):
         return raw.get("observation", raw)
@@ -54,12 +51,30 @@ def normalize_obs(raw):
     return {}
 
 
-# ── SANITIZE ACTION ─────────────────────────────────
+# ── SANITIZE ──────────────────────────────
 def sanitize(d):
     return {k: max(0, int(v)) for k, v in d.items() if isinstance(v, (int, float))}
 
 
-# ── PRIORITY FUNCTION (SMART STRATEGY) ──────────────
+# ── LIMIT RESOURCES (MAIN FIX) ────────────
+def limit_resources(action, resources):
+    def scale(d, max_total):
+        total = sum(d.values())
+        if total <= max_total or total == 0:
+            return d
+        ratio = max_total / total
+        return {k: max(0, int(v * ratio)) for k, v in d.items()}
+
+    action.allocate_rescue = scale(action.allocate_rescue, resources.get("rescue_teams", 0))
+    action.send_food = scale(action.send_food, resources.get("food_units", 0))
+    action.send_medical = scale(action.send_medical, resources.get("medical_kits", 0))
+    action.deploy_helicopters = scale(action.deploy_helicopters, resources.get("helicopters", 0))
+    action.deploy_barriers = scale(action.deploy_barriers, resources.get("flood_barriers", 0))
+
+    return action
+
+
+# ── PRIORITY LOGIC ────────────────────────
 def compute_priority(zone):
     pop = zone.get("population", 1)
     injured = zone.get("injured", 0)
@@ -72,7 +87,7 @@ def compute_priority(zone):
     return injury_ratio * 3 + flood * 0.8 + (unsheltered / pop) * 1.5
 
 
-# ── LLM ACTION ──────────────────────────────────────
+# ── LLM ACTION ───────────────────────────
 def get_action(client, observation):
 
     zones = observation.get("zones", [])
@@ -90,7 +105,9 @@ def get_action(client, observation):
     prompt = f"""
 You are an expert disaster response AI maximizing survival score.
 
-Rules:
+STRICT RULES:
+- NEVER exceed available resources
+- Use only ~70% of resources per step
 - PRIORITIZE highest injury zones
 - If flood >= 7 → deploy barriers
 - If blocked → send helicopter FIRST
@@ -127,9 +144,12 @@ Return ONLY JSON:
                 timeout=10,
             )
 
-            data = json.loads(res.choices[0].message.content)
+            text = res.choices[0].message.content.strip()
+            text = text.replace("```json", "").replace("```", "").strip()
 
-            return Action(
+            data = json.loads(text)
+
+            action = Action(
                 allocate_rescue=sanitize(data.get("allocate_rescue", {})),
                 send_food=sanitize(data.get("send_food", {})),
                 send_medical=sanitize(data.get("send_medical", {})),
@@ -138,13 +158,18 @@ Return ONLY JSON:
                 evacuate=sanitize(data.get("evacuate", {})),
             )
 
-        except:
+            # 🔥 FIX APPLIED HERE
+            action = limit_resources(action, resources)
+
+            return action
+
+        except Exception as e:
             continue
 
     return rule_based_action(observation)
 
 
-# ── FALLBACK ────────────────────────────────────────
+# ── FALLBACK ──────────────────────────────
 def rule_based_action(observation):
     zones = observation.get("zones", [])
     resources = observation.get("resources", {})
@@ -168,7 +193,7 @@ def rule_based_action(observation):
     return action
 
 
-# ── RUN TASK ────────────────────────────────────────
+# ── RUN TASK ──────────────────────────────
 async def run_task(client, task_module, task_name):
 
     env = DisasterEnv(task_module)
@@ -219,7 +244,7 @@ async def run_task(client, task_module, task_name):
     return success
 
 
-# ── MAIN ────────────────────────────────────────────
+# ── MAIN ─────────────────────────────────
 async def main():
     client = OpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN)
 
