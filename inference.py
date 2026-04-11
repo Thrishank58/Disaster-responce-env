@@ -216,31 +216,42 @@ def rule_based_action(observation: dict) -> Action:
             deploy_helicopters[zid] = 1
             helis -= 1
 
-    # Allocate remaining resources
-    for zone in sorted_zones:
-        zid = zone["id"]
-        blocked   = zone["access"] in ("road_blocked", "air_only")
-        reachable = not blocked or zid in deploy_helicopters
+    # Count reachable zones for fair division
+    reachable_zones = [
+        z for z in sorted_zones
+        if z["access"] == "open" or z["id"] in deploy_helicopters
+    ]
+    nr = max(len(reachable_zones), 1)
 
-        if reachable and zone["injured"] > 0 and rescue > 0:
-            share = min(max(1, rescue // n), rescue)
+    # Allocate remaining resources — only to reachable zones
+    for zone in reachable_zones:
+        zid = zone["id"]
+
+        if zone["injured"] > 0 and rescue > 0:
+            share = min(max(1, rescue // nr), rescue)
             allocate_rescue[zid] = share
             rescue -= share
 
-        if reachable and food > 0:
-            share = min(max(1, food // n), food)
+        if food > 0:
+            share = min(max(1, food // nr), food)
             send_food[zid] = share
             food -= share
 
-        if reachable and zone["injured"] > 0 and medical > 0:
-            share = min(max(1, medical // n), medical)
+        if zone["injured"] > 0 and medical > 0:
+            share = min(max(1, medical // nr), medical)
             send_medical[zid] = share
             medical -= share
 
+    # Barriers go to highest-flood zones regardless of access
+    for zone in sorted_zones:
+        zid = zone["id"]
         if barriers > 0 and zone["flood_level"] >= 7:
             deploy_barriers[zid] = 1
             barriers -= 1
 
+    # Evacuate all zones
+    for zone in sorted_zones:
+        zid = zone["id"]
         can_evac = zone["population"] - zone["sheltered"]
         if can_evac > 0:
             evacuate[zid] = min(60, can_evac)
