@@ -107,31 +107,36 @@ Respond ONLY with a valid JSON object (no explanation, no markdown):
 }}
 Zone IDs: {zone_ids}"""
 
-    try:
-        completion = client.chat.completions.create(
-            model=MODEL_NAME,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.1,
-            max_tokens=400,
-            stream=False,
-            timeout=10,
-        )
-        text = (completion.choices[0].message.content or "").strip()
-        text = text.replace("```json", "").replace("```", "").strip()
-        data = json.loads(text)
-        action = Action(
-            allocate_rescue=data.get("allocate_rescue", {}),
-            send_food=data.get("send_food", {}),
-            send_medical=data.get("send_medical", {}),
-            deploy_helicopters=data.get("deploy_helicopters", {}),
-            deploy_barriers=data.get("deploy_barriers", {}),
-            evacuate=data.get("evacuate", {}),
-        )
-        time.sleep(4)
-        return _fix_action(action, zones)
-    except Exception as e:
-        print(f"LLM ERROR: {e}", flush=True)
-        return rule_based_action(observation)
+    def _sanitize(d):
+        return {k: int(v) for k, v in d.items() if v and int(v) > 0}
+
+    for attempt in range(2):
+        try:
+            completion = client.chat.completions.create(
+                model=MODEL_NAME,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.1,
+                max_tokens=400,
+                stream=False,
+                timeout=10,
+            )
+            text = (completion.choices[0].message.content or "").strip()
+            text = text.replace("```json", "").replace("```", "").strip()
+            data = json.loads(text)
+            action = Action(
+                allocate_rescue=_sanitize(data.get("allocate_rescue", {})),
+                send_food=_sanitize(data.get("send_food", {})),
+                send_medical=_sanitize(data.get("send_medical", {})),
+                deploy_helicopters=_sanitize(data.get("deploy_helicopters", {})),
+                deploy_barriers=_sanitize(data.get("deploy_barriers", {})),
+                evacuate=_sanitize(data.get("evacuate", {})),
+            )
+            time.sleep(4)
+            return _fix_action(action, zones)
+        except Exception as e:
+            print(f"LLM ERROR (attempt {attempt+1}): {e}", flush=True)
+            if attempt == 1:
+                return rule_based_action(observation)
 
 
 # ── ACTION VALIDATOR ──────────────────────────────────────────────────────────
