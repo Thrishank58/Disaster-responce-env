@@ -10,7 +10,6 @@ Environment variables:
 import asyncio
 import os
 import json
-import httpx
 from typing import List, Optional
 
 from openai import OpenAI
@@ -44,10 +43,10 @@ def log_step(step: int, action: str, reward: float, done: bool, error: Optional[
         flush=True,
     )
 
-def log_end(success: bool, steps: int, rewards: List[float]):
+def log_end(success: bool, steps: int, score: float, rewards: List[float]):
     rewards_str = ",".join(f"{r:.2f}" for r in rewards)
     print(
-        f"[END] success={str(success).lower()} steps={steps} rewards={rewards_str}",
+        f"[END] success={str(success).lower()} steps={steps} score={score:.3f} rewards={rewards_str}",
         flush=True,
     )
 
@@ -272,7 +271,7 @@ async def run_task(client: OpenAI, task_module, task_name: str):
     finally:
         if hasattr(env, "close"):
             await env.close()
-        log_end(success=success, steps=steps_taken, rewards=rewards)
+        log_end(success=success, steps=steps_taken, score=score, rewards=rewards)
 
     return score
 
