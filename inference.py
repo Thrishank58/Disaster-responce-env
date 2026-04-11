@@ -1,3 +1,12 @@
+"""
+Disaster Response Coordinator — Baseline Inference Script
+
+Environment variables:
+  API_BASE_URL   : LLM API base URL       (default: https://api.openai.com/v1)
+  MODEL_NAME     : model identifier       (default: gpt-4o-mini)
+  HF_TOKEN       : Hugging Face API key   (REQUIRED — no default)
+"""
+
 import asyncio
 import os
 import json
@@ -12,62 +21,97 @@ import tasks.easy as easy_task
 import tasks.medium as medium_task
 import tasks.hard as hard_task
 
-# ── ENV VARS ────────────────────────────────────────────────────────────────
-API_KEY      = os.getenv("HF_TOKEN") or os.getenv("OPENAI_API_KEY") or os.getenv("API_KEY", "no-key")
+# ── ENV VARS ──────────────────────────────────────────────────────────────────
 API_BASE_URL = os.getenv("API_BASE_URL", "https://api.openai.com/v1")
 MODEL_NAME   = os.getenv("MODEL_NAME", "gpt-4o-mini")
-LOCAL_IMAGE_NAME = os.getenv("LOCAL_IMAGE_NAME")
-BENCHMARK    = "disaster-response-env"
+HF_TOKEN     = os.getenv("HF_TOKEN")
 
-# ── LOGGING ─────────────────────────────────────────────────────────────────
+if HF_TOKEN is None:
+    raise ValueError("HF_TOKEN environment variable is required")
+
+BENCHMARK = "disaster-response-env"
+
+# ── LOGGING — exact format required by hackathon checker ─────────────────────
 def log_start(task: str, env: str, model: str):
     print(f"[START] task={task} env={env} model={model}", flush=True)
 
 def log_step(step: int, action: str, reward: float, done: bool, error: Optional[str]):
     error_val = error if error else "null"
-    print(f"[STEP] step={step} action={action} reward={reward:.2f} done={str(done).lower()} error={error_val}", flush=True)
+    print(
+        f"[STEP] step={step} action={action} reward={reward:.2f} "
+        f"done={str(done).lower()} error={error_val}",
+        flush=True,
+    )
 
-def log_end(success: bool, steps: int, score: float, rewards: List[float]):
+def log_end(success: bool, steps: int, rewards: List[float]):
     rewards_str = ",".join(f"{r:.2f}" for r in rewards)
-    print(f"[END] success={str(success).lower()} steps={steps} score={score:.3f} rewards={rewards_str}", flush=True)
+    print(
+        f"[END] success={str(success).lower()} steps={steps} rewards={rewards_str}",
+        flush=True,
+    )
 
-# ── LLM CALL ────────────────────────────────────────────────────────────────
+
+# ── LLM CALL ─────────────────────────────────────────────────────────────────
 def get_action(client: OpenAI, observation: dict) -> Action:
-    zones = observation.get("zones", [])
+    zones     = observation.get("zones", [])
     resources = observation.get("resources", {})
-    zone_ids = [z["id"] for z in zones]
+    weather   = observation.get("weather", "unknown")
+    time_step = observation.get("time_step", 0)
+    zone_ids  = [z["id"] for z in zones]
 
     zone_summary = "\n".join(
-        f"  Zone {z['id']}: population={z['population']}, injured={z['injured']}, "
-        f"flood_level={z['flood_level']}, access={z['access']}"
+        f"  Zone {z['id']}: pop={z['population']}, injured={z['injured']}, "
+        f"flood={z['flood_level']}/10, access={z['access']}, "
+        f"sheltered={z['sheltered']}, barriers_deployed={z['flood_control_level']}"
         for z in zones
     )
 
-    prompt = f"""You are an AI disaster response coordinator.
+    prompt = f"""You are an AI disaster response coordinator managing a flood emergency.
 
-Current situation:
+=== CURRENT STATE (step {time_step}) ===
+Weather: {weather}
+
+Zones:
 {zone_summary}
 
-Available resources:
-  rescue_teams={resources.get('rescue_teams', 0)}
-  food_units={resources.get('food_units', 0)}
-  medical_kits={resources.get('medical_kits', 0)}
+Available resources (totals across ALL zones must NOT exceed these):
+  rescue_teams  : {resources.get('rescue_teams', 0)}
+  food_units    : {resources.get('food_units', 0)}
+  medical_kits  : {resources.get('medical_kits', 0)}
+  helicopters   : {resources.get('helicopters', 0)}
+  flood_barriers: {resources.get('flood_barriers', 0)}
 
-Allocate resources across zones to minimize injuries and maximize survival.
-Respond ONLY with a valid JSON object with these exact keys:
+=== KEY RULES ===
+1. Zones with access=road_blocked or access=air_only CANNOT receive rescue/medical/food
+   UNLESS you also send at least 1 helicopter to that zone via deploy_helicopters.
+2. Total resource usage across all zones must not exceed available amounts.
+3. deploy_barriers increases a zone's flood resistance (reduces future flood rise).
+4. evacuate moves civilians to shelter, reducing future injury exposure.
+5. Conserve some resources for future steps — episodes last {20} steps.
+
+=== STRATEGY TIPS ===
+- Prioritise zones with high injury counts AND high flood levels.
+- Always send helicopters to blocked/air-only zones if you want to help them.
+- Deploy barriers early to high-flood zones to prevent worsening.
+- Spread medical kits across steps rather than using all at once.
+
+Respond ONLY with a valid JSON object (no explanation, no markdown):
 {{
-  "allocate_rescue": {{"ZONE_ID": int, ...}},
-  "send_food": {{"ZONE_ID": int, ...}},
-  "send_medical": {{"ZONE_ID": int, ...}}
+  "allocate_rescue":    {{"ZONE_ID": int, ...}},
+  "send_food":          {{"ZONE_ID": int, ...}},
+  "send_medical":       {{"ZONE_ID": int, ...}},
+  "deploy_helicopters": {{"ZONE_ID": int, ...}},
+  "deploy_barriers":    {{"ZONE_ID": int, ...}},
+  "evacuate":           {{"ZONE_ID": int, ...}}
 }}
-Zone IDs are: {zone_ids}. No explanation, just JSON."""
+Zone IDs: {zone_ids}"""
 
     try:
         completion = client.chat.completions.create(
             model=MODEL_NAME,
             messages=[{"role": "user", "content": prompt}],
-            temperature=0.2,
-            max_tokens=300,
+            temperature=0.1,
+            max_tokens=400,
             stream=False,
         )
         text = (completion.choices[0].message.content or "").strip()
@@ -77,37 +121,104 @@ Zone IDs are: {zone_ids}. No explanation, just JSON."""
             allocate_rescue=data.get("allocate_rescue", {}),
             send_food=data.get("send_food", {}),
             send_medical=data.get("send_medical", {}),
+            deploy_helicopters=data.get("deploy_helicopters", {}),
+            deploy_barriers=data.get("deploy_barriers", {}),
+            evacuate=data.get("evacuate", {}),
         )
     except Exception as e:
-        print("LLM ERROR:", e)
+        print(f"LLM ERROR: {e}", flush=True)
         return rule_based_action(observation)
 
 
-# ── FALLBACK LOGIC ──────────────────────────────────────────────────────────
+# ── RULE-BASED FALLBACK ───────────────────────────────────────────────────────
 def rule_based_action(observation: dict) -> Action:
-    zones = observation.get("zones", [])
+    """
+    Spreads resources conservatively across steps.
+    Sends helicopters to blocked zones before rescue/medical.
+    Deploys barriers to highest-flood zones.
+    """
+    zones     = observation.get("zones", [])
     resources = observation.get("resources", {})
-    n = max(len(zones), 1)
 
-    rescue  = resources.get("rescue_teams", 0)
-    food    = resources.get("food_units", 0)
-    medical = resources.get("medical_kits", 0)
+    available_rescue  = resources.get("rescue_teams", 0)
+    available_food    = resources.get("food_units", 0)
+    available_medical = resources.get("medical_kits", 0)
+    available_helis   = resources.get("helicopters", 0)
+    available_barriers = resources.get("flood_barriers", 0)
 
-    allocate_rescue, send_food, send_medical = {}, {}, {}
-    for z in zones:
-        zid = z["id"]
-        allocate_rescue[zid] = max(1, rescue // n)
-        send_food[zid]       = max(1, food // n)
-        send_medical[zid]    = max(1, medical // n)
+    # Use at most half the available resources per step (save for later)
+    budget_rescue  = max(1, available_rescue  // 2)
+    budget_food    = max(1, available_food    // 2)
+    budget_medical = max(1, available_medical // 2)
+    budget_barriers = available_barriers // 2
+
+    allocate_rescue    = {}
+    send_food          = {}
+    send_medical       = {}
+    deploy_helicopters = {}
+    deploy_barriers    = {}
+    evacuate           = {}
+
+    # Sort zones by injury severity descending for triage
+    sorted_zones = sorted(zones, key=lambda z: z["injured"], reverse=True)
+    n = max(len(sorted_zones), 1)
+
+    helis_left    = available_helis
+    barriers_left = budget_barriers
+    rescue_left   = budget_rescue
+    food_left     = budget_food
+    medical_left  = budget_medical
+
+    for zone in sorted_zones:
+        zid = zone["id"]
+        blocked  = zone["access"] in ("road_blocked", "air_only")
+
+        # Send helicopter to blocked zone (1 per blocked zone while stock lasts)
+        if blocked and helis_left > 0:
+            deploy_helicopters[zid] = 1
+            helis_left -= 1
+
+        can_reach = (not blocked) or (zid in deploy_helicopters)
+
+        # Allocate rescue proportionally
+        share_rescue = max(1, rescue_left // n)
+        if can_reach and zone["injured"] > 0:
+            allocate_rescue[zid] = share_rescue
+            rescue_left = max(0, rescue_left - share_rescue)
+
+        # Food for all reachable zones
+        share_food = max(1, food_left // n)
+        if can_reach or not blocked:
+            send_food[zid] = share_food
+            food_left = max(0, food_left - share_food)
+
+        # Medical kits
+        share_medical = max(1, medical_left // n)
+        if can_reach and zone["injured"] > 0:
+            send_medical[zid] = share_medical
+            medical_left = max(0, medical_left - share_medical)
+
+        # Barrier to high-flood zones
+        if barriers_left > 0 and zone["flood_level"] >= 7:
+            deploy_barriers[zid] = 1
+            barriers_left -= 1
+
+        # Evacuate a small batch each step
+        can_evacuate = zone["population"] - zone["sheltered"]
+        if can_evacuate > 0:
+            evacuate[zid] = min(50, can_evacuate)
 
     return Action(
         allocate_rescue=allocate_rescue,
         send_food=send_food,
         send_medical=send_medical,
+        deploy_helicopters=deploy_helicopters,
+        deploy_barriers=deploy_barriers,
+        evacuate=evacuate,
     )
 
 
-# ── RUN ONE TASK ─────────────────────────────────────────────────────────────
+# ── RUN ONE TASK ──────────────────────────────────────────────────────────────
 async def run_task(client: OpenAI, task_module, task_name: str):
     env = DisasterEnv(task_module)
     rewards: List[float] = []
@@ -125,13 +236,17 @@ async def run_task(client: OpenAI, task_module, task_name: str):
                 break
 
             obs_dict = result["observation"].model_dump()
-            action = get_action(client, obs_dict)
-            action_str = f"rescue={action.allocate_rescue} food={action.send_food} medical={action.send_medical}"
+            action   = get_action(client, obs_dict)
 
-            result = await env.step(action)
+            action_str = (
+                f"rescue={action.allocate_rescue} food={action.send_food} "
+                f"medical={action.send_medical} heli={action.deploy_helicopters} "
+                f"barriers={action.deploy_barriers} evac={action.evacuate}"
+            )
 
-            reward = result["reward"]
-            done   = result["done"]
+            result      = await env.step(action)
+            reward      = result["reward"]
+            done        = result["done"]
             rewards.append(reward)
             steps_taken = step
 
@@ -141,22 +256,22 @@ async def run_task(client: OpenAI, task_module, task_name: str):
                 break
 
         final_state = result["observation"].model_dump()
-        score = grade(final_state)
-        score = max(0.0, min(1.0, score))
+        score   = grade(final_state)
+        score   = max(0.0, min(1.0, score))
         success = score >= 0.5
 
     except Exception as e:
         log_step(step=steps_taken + 1, action="error", reward=0.0, done=True, error=str(e))
 
     finally:
-        log_end(success=success, steps=steps_taken, score=score, rewards=rewards)
+        log_end(success=success, steps=steps_taken, rewards=rewards)
 
     return score
 
 
-# ── MAIN ─────────────────────────────────────────────────────────────────────
+# ── MAIN ──────────────────────────────────────────────────────────────────────
 async def main():
-    client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
+    client = OpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN)
 
     all_tasks = [
         (easy_task,   "easy"),

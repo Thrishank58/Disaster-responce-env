@@ -1,12 +1,43 @@
 name: disaster_response_env
-description: AI agent manages disaster response under flood conditions with limited resources and dynamic events
+version: "2.0.0"
+description: >
+  AI agent manages flood disaster response under scarce resources, dynamic weather,
+  and degrading zone access. Agent must triage injuries, control flood levels,
+  evacuate civilians, and deploy helicopters to cut-off zones.
+
 entrypoint: env:DisasterEnv
 
 observation:
   type: Observation
+  description: >
+    Zone-wise state (population, injuries, flood level, access, sheltered count),
+    available resources (rescue teams, food, medical kits, helicopters, flood barriers),
+    current weather, and episode-level totals.
 
 action:
   type: Action
+  description: >
+    Per-zone allocation of rescue_teams, food_units, medical_kits, helicopters
+    (required for blocked zones), flood_barriers, and evacuation counts.
 
 reward:
   type: Reward
+  description: >
+    Step-level reward shaped by rescues, medical aid, shelter, flood prevention,
+    and penalties for high injury ratios and critical flood levels.
+
+tasks:
+  - name: easy
+    description: Single zone, open access, moderate flood, light injuries.
+    max_steps: 10
+    expected_score_range: [0.50, 0.85]
+
+  - name: medium
+    description: Two zones — one road-blocked requiring helicopters — heavier injuries.
+    max_steps: 15
+    expected_score_range: [0.35, 0.75]
+
+  - name: hard
+    description: Three zones — storm weather, one air-only, scarce helicopters, critical floods. Agent must triage.
+    max_steps: 20
+    expected_score_range: [0.20, 0.65]

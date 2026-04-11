@@ -1,19 +1,18 @@
 [project]
 name = "disaster-response-env"
-version = "0.1.0"
-description = "AI disaster response environment for flood scenarios"
+version = "2.0.0"
+description = "OpenEnv flood disaster response environment — AI agent allocates resources under dynamic conditions"
 authors = [
     {name = "Thrishank"}
 ]
 
 dependencies = [
-    "pydantic",
-    "openai",
+    "pydantic>=2.0",
+    "openai>=1.0",
+    "fastapi>=0.100",
+    "uvicorn>=0.22",
     "openenv-core>=0.2.0"
 ]
-
-[project.scripts]
-server = "server.app:main"
 
 [tool.openenv]
 entrypoint = "env:DisasterEnv"

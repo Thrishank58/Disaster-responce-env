@@ -1,26 +1,38 @@
-from fastapi import FastAPI
+import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from fastapi import FastAPI, HTTPException
 from env import DisasterEnv
 from models import Action
 import tasks.easy as easy_task
 import tasks.medium as medium_task
 import tasks.hard as hard_task
 
-app = FastAPI(title="Disaster Response Env")
+app = FastAPI(
+    title="Disaster Response Coordinator Env",
+    description="OpenEnv-compatible flood disaster response simulation. "
+                "An AI agent allocates rescue teams, medical kits, food, helicopters, "
+                "and flood barriers across zones under dynamic weather and access conditions.",
+    version="2.0.0",
+)
 
-# one env per task
 envs = {
     "easy":   DisasterEnv(easy_task),
     "medium": DisasterEnv(medium_task),
     "hard":   DisasterEnv(hard_task),
 }
 
-# default active env is easy
 active_env = envs["easy"]
 
 
 @app.get("/")
 async def root():
-    return {"message": "Disaster Response Env is running", "tasks": list(envs.keys())}
+    return {
+        "message": "Disaster Response Coordinator Env is running",
+        "tasks": list(envs.keys()),
+        "version": "2.0.0",
+    }
 
 
 @app.get("/health")
@@ -31,7 +43,9 @@ async def health():
 @app.post("/reset")
 async def reset(task: str = "easy"):
     global active_env
-    active_env = envs.get(task, envs["easy"])
+    if task not in envs:
+        raise HTTPException(status_code=400, detail=f"Unknown task '{task}'. Choose from: {list(envs.keys())}")
+    active_env = envs[task]
     result = await active_env.reset()
     return {
         "observation": result["observation"].model_dump(),
