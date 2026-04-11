@@ -3,17 +3,18 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import HTMLResponse
 from env import DisasterEnv
 from models import Action
 import tasks.easy as easy_task
 import tasks.medium as medium_task
 import tasks.hard as hard_task
 
+_DASHBOARD_PATH = os.path.join(os.path.dirname(__file__), "dashboard.html")
+
 app = FastAPI(
     title="Disaster Response Coordinator Env",
-    description="OpenEnv-compatible flood disaster response simulation. "
-                "An AI agent allocates rescue teams, medical kits, food, helicopters, "
-                "and flood barriers across zones under dynamic weather and access conditions.",
+    description="OpenEnv-compatible flood disaster response simulation.",
     version="2.0.0",
 )
 
@@ -26,13 +27,10 @@ envs = {
 active_env = envs["easy"]
 
 
-@app.get("/")
+@app.get("/", response_class=HTMLResponse)
 async def root():
-    return {
-        "message": "Disaster Response Coordinator Env is running",
-        "tasks": list(envs.keys()),
-        "version": "2.0.0",
-    }
+    with open(_DASHBOARD_PATH, "r") as f:
+        return HTMLResponse(content=f.read())
 
 
 @app.get("/health")
