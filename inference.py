@@ -3,13 +3,14 @@ Disaster Response Coordinator — Baseline Inference Script
 
 Environment variables:
   API_BASE_URL   : LLM API base URL       (default: https://api.openai.com/v1)
-  MODEL_NAME     : model identifier       (default: gpt-4o-mini)
+  MODEL_NAME     : model identifier       (default: gpt-4.1-mini)
   HF_TOKEN       : Hugging Face API key   (REQUIRED — no default)
 """
 
 import asyncio
 import os
 import json
+import httpx
 from typing import List, Optional
 
 from openai import OpenAI
@@ -23,7 +24,7 @@ import tasks.hard as hard_task
 
 # ── ENV VARS ──────────────────────────────────────────────────────────────────
 API_BASE_URL = os.getenv("API_BASE_URL", "https://api.openai.com/v1")
-MODEL_NAME   = os.getenv("MODEL_NAME", "gpt-4o-mini")
+MODEL_NAME   = os.getenv("MODEL_NAME", "gpt-4.1-mini")
 HF_TOKEN     = os.getenv("HF_TOKEN")
 
 if HF_TOKEN is None:
@@ -113,6 +114,7 @@ Zone IDs: {zone_ids}"""
             temperature=0.1,
             max_tokens=400,
             stream=False,
+            timeout=10,
         )
         text = (completion.choices[0].message.content or "").strip()
         text = text.replace("```json", "").replace("```", "").strip()
@@ -238,19 +240,23 @@ async def run_task(client: OpenAI, task_module, task_name: str):
             obs_dict = result["observation"].model_dump()
             action   = get_action(client, obs_dict)
 
-            action_str = (
-                f"rescue={action.allocate_rescue} food={action.send_food} "
-                f"medical={action.send_medical} heli={action.deploy_helicopters} "
-                f"barriers={action.deploy_barriers} evac={action.evacuate}"
-            )
+            action_str = json.dumps({
+                "rescue":   action.allocate_rescue,
+                "food":     action.send_food,
+                "medical":  action.send_medical,
+                "heli":     action.deploy_helicopters,
+                "barriers": action.deploy_barriers,
+                "evac":     action.evacuate,
+            }, separators=(",", ":"))
 
             result      = await env.step(action)
             reward      = result["reward"]
             done        = result["done"]
+            error_msg   = result["info"].get("error", None)
             rewards.append(reward)
             steps_taken = step
 
-            log_step(step=step, action=action_str, reward=reward, done=done, error=None)
+            log_step(step=step, action=action_str, reward=reward, done=done, error=error_msg)
 
             if done:
                 break
@@ -264,6 +270,8 @@ async def run_task(client: OpenAI, task_module, task_name: str):
         log_step(step=steps_taken + 1, action="error", reward=0.0, done=True, error=str(e))
 
     finally:
+        if hasattr(env, "close"):
+            await env.close()
         log_end(success=success, steps=steps_taken, rewards=rewards)
 
     return score
