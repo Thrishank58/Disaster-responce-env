@@ -32,22 +32,27 @@ if HF_TOKEN is None:
 
 BENCHMARK = "disaster-response-env"
 
+
+# ── CLAMP HELPER ──────────────────────────────────────────────────────────────
+def _clamp(v: float) -> float:
+    """Strictly between 0 and 1 — never exactly 0.0 or 1.0"""
+    return max(0.01, min(0.99, float(v)))
+
+
 # ── LOGGING — exact format required by hackathon checker ─────────────────────
 def log_start(task: str, env: str, model: str):
     print(f"[START] task={task} env={env} model={model}", flush=True)
 
 def log_step(step: int, action: str, reward: float, done: bool, error: Optional[str]):
     error_val = error if error else "null"
-    r = max(0.01, min(0.99, reward)) if reward == 0.0 or reward == 1.0 else reward
     print(
-        f"[STEP] step={step} action={action} reward={r:.2f} "
+        f"[STEP] step={step} action={action} reward={_clamp(reward):.2f} "
         f"done={str(done).lower()} error={error_val}",
         flush=True,
     )
 
 def log_end(success: bool, steps: int, rewards: List[float]):
-    clamped = [max(0.01, min(0.99, r)) if r == 0.0 or r == 1.0 else r for r in rewards]
-    rewards_str = ",".join(f"{r:.2f}" for r in clamped)
+    rewards_str = ",".join(f"{_clamp(r):.2f}" for r in rewards)
     print(
         f"[END] success={str(success).lower()} steps={steps} rewards={rewards_str}",
         flush=True,
@@ -304,8 +309,7 @@ async def run_task(client: OpenAI, task_module, task_name: str):
                 break
 
         final_state = result["observation"].model_dump()
-        score   = grade(final_state)
-        score   = max(0.01, min(0.99, score))
+        score   = _clamp(grade(final_state))
         success = score >= 0.5
 
     except Exception as e:
