@@ -73,8 +73,11 @@ async def state():
 @app.post("/grade")
 async def grade_endpoint():
     from grader import grade
+    import json
     obs = await active_env.state()
-    raw = grade(obs.model_dump())
+    # Force full JSON serialization to ensure plain dicts/lists
+    raw_dict = json.loads(obs.model_dump_json())
+    raw = grade(raw_dict)
     score = float(max(0.01, min(0.99, raw)))
     return {"score": score}
 
