@@ -38,14 +38,16 @@ def log_start(task: str, env: str, model: str):
 
 def log_step(step: int, action: str, reward: float, done: bool, error: Optional[str]):
     error_val = error if error else "null"
+    r = max(0.01, min(0.99, reward)) if reward == 0.0 or reward == 1.0 else reward
     print(
-        f"[STEP] step={step} action={action} reward={reward:.2f} "
+        f"[STEP] step={step} action={action} reward={r:.2f} "
         f"done={str(done).lower()} error={error_val}",
         flush=True,
     )
 
 def log_end(success: bool, steps: int, rewards: List[float]):
-    rewards_str = ",".join(f"{r:.2f}" for r in rewards)
+    clamped = [max(0.01, min(0.99, r)) if r == 0.0 or r == 1.0 else r for r in rewards]
+    rewards_str = ",".join(f"{r:.2f}" for r in clamped)
     print(
         f"[END] success={str(success).lower()} steps={steps} rewards={rewards_str}",
         flush=True,
