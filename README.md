@@ -177,7 +177,7 @@ uvicorn server.app:app --host 0.0.0.0 --port 7860
 ```bash
 export API_BASE_URL=https://api.openai.com/v1
 export MODEL_NAME=gpt-4o-mini
-export OPENAI_API_KEY=sk-...
+export HF_TOKEN=hf_...   # required — passed as OpenAI client api_key (see submission guidelines)
 
 python inference.py
 ```

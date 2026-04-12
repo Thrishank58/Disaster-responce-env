@@ -35,7 +35,9 @@ def grade(state: dict) -> float:
     flood_score = max(0.0, 1.0 - (avg_flood - 5) / 5) if avg_flood > 5 else 1.0
 
     # ── Equity (fairness across zones) ───────────────────────────────────────
-    zone_survival = [1.0 - (z["injured"] / z["population"]) for z in zones]
+    zone_survival = [
+        1.0 - (z["injured"] / max(z["population"], 1)) for z in zones
+    ]
     worst_zone_survival = min(zone_survival)
     avg_zone_survival   = sum(zone_survival) / len(zone_survival)
     equity = worst_zone_survival / max(avg_zone_survival, 0.01)
@@ -62,4 +64,3 @@ def grade(state: dict) -> float:
 
     # Strictly between 0 and 1 — never exactly 0.0 or 1.0
     return round(max(0.01, min(0.99, score)), 4)
-# fix

@@ -226,5 +226,8 @@ class DisasterEnv:
             "info": info,
         }
 
+    async def close(self):
+        """No resources to release; present for OpenEnv / inference lifecycle parity."""
+
     async def state(self):
         return Observation(**self.state_data)

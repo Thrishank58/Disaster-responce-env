@@ -1,16 +1,22 @@
 """
 Disaster Response Coordinator — Baseline Inference Script
 
+STDOUT (OpenEnv): [START] … → [STEP] … per env.step() → [END] … after env.close().
+[END] includes score=<episode score> and rewards=<comma-separated step rewards>, all 2 d.p.
+
 Environment variables:
-  API_BASE_URL   : LLM API base URL       (default: https://api.openai.com/v1)
-  MODEL_NAME     : model identifier       (default: gpt-4.1-mini)
-  HF_TOKEN       : Hugging Face API key   (REQUIRED — no default)
+  API_BASE_URL          : LLM base URL (default: https://api.openai.com/v1)
+  MODEL_NAME            : model id       (default: gpt-4.1-mini)
+  HF_TOKEN              : HF API token   (required)
+  INFERENCE_STEP_SLEEP  : seconds to sleep after each successful LLM call (default: 0).
+                          Set e.g. 0.25 if you hit rate limits; keep 0 for eval time limits.
 """
 
 import asyncio
-import time
-import os
 import json
+import os
+import sys
+import time
 from typing import List, Optional
 
 from openai import OpenAI
@@ -30,13 +36,24 @@ HF_TOKEN     = os.getenv("HF_TOKEN")
 if HF_TOKEN is None:
     raise ValueError("HF_TOKEN environment variable is required")
 
+try:
+    INFERENCE_STEP_SLEEP = float(os.getenv("INFERENCE_STEP_SLEEP") or "0")
+except ValueError:
+    INFERENCE_STEP_SLEEP = 0.0
+
 BENCHMARK = "disaster-response-env"
 
 
 # ── CLAMP HELPER ──────────────────────────────────────────────────────────────
 def _clamp(v: float) -> float:
-    """Strictly between 0 and 1 — never exactly 0.0 or 1.0"""
-    return max(0.01, min(0.99, float(v)))
+    """Strictly between 0 and 1 — never exactly 0.0 or 1.0 (platform task validation)."""
+    try:
+        x = float(v)
+    except (TypeError, ValueError):
+        return 0.01
+    if x != x or x == float("inf") or x == float("-inf"):  # NaN / inf
+        return 0.01
+    return max(0.01, min(0.99, x))
 
 
 # ── LOGGING — exact format required by hackathon checker ─────────────────────
@@ -46,15 +63,18 @@ def log_start(task: str, env: str, model: str):
 def log_step(step: int, action: str, reward: float, done: bool, error: Optional[str]):
     error_val = error if error else "null"
     print(
-        f"[STEP] step={step} action={action} reward={_clamp(reward):.2f} "
+        f"[STEP] step={step} action={action} reward={float(reward):.2f} "
         f"done={str(done).lower()} error={error_val}",
         flush=True,
     )
 
-def log_end(success: bool, steps: int, rewards: List[float]):
-    rewards_str = ",".join(f"{_clamp(r):.2f}" for r in rewards)
+
+def log_end(success: bool, steps: int, score: float, rewards: List[float]) -> None:
+    """[END] must include episode score (task grader, in [0, 1] per OpenEnv spec)."""
+    rewards_str = ",".join(f"{float(r):.2f}" for r in rewards)
+    s = _clamp(score)
     print(
-        f"[END] success={str(success).lower()} steps={steps} rewards={rewards_str}",
+        f"[END] success={str(success).lower()} steps={steps} score={s:.2f} rewards={rewards_str}",
         flush=True,
     )
 
@@ -138,10 +158,11 @@ Zone IDs: {zone_ids}"""
                 deploy_barriers=_sanitize(data.get("deploy_barriers", {})),
                 evacuate=_sanitize(data.get("evacuate", {})),
             )
-            time.sleep(4)
+            if INFERENCE_STEP_SLEEP > 0:
+                time.sleep(INFERENCE_STEP_SLEEP)
             return _fix_action(action, zones)
         except Exception as e:
-            print(f"LLM ERROR (attempt {attempt+1}): {e}", flush=True)
+            print(f"LLM ERROR (attempt {attempt+1}): {e}", file=sys.stderr, flush=True)
             if attempt == 1:
                 return rule_based_action(observation)
 
@@ -318,9 +339,9 @@ async def run_task(client: OpenAI, task_module, task_name: str):
     finally:
         if hasattr(env, "close"):
             await env.close()
-        log_end(success=success, steps=steps_taken, rewards=rewards)
+        log_end(success=success, steps=steps_taken, score=score, rewards=rewards)
 
-    return score
+    return _clamp(score)
 
 
 # ── MAIN ──────────────────────────────────────────────────────────────────────
@@ -335,7 +356,6 @@ async def main():
 
     for task_module, task_name in all_tasks:
         await run_task(client, task_module, task_name)
-        print("", flush=True)
 
 
 if __name__ == "__main__":
