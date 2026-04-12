@@ -44,7 +44,7 @@ def log_step(step: int, action: str, reward: float, done: bool, error: Optional[
         flush=True,
     )
 
-def log_end(success: bool, steps: int, score: float, rewards: List[float]):
+def log_end(success: bool, steps: int, rewards: List[float]):
     rewards_str = ",".join(f"{r:.2f}" for r in rewards)
     print(
         f"[END] success={str(success).lower()} steps={steps} rewards={rewards_str}",
@@ -143,14 +143,13 @@ Zone IDs: {zone_ids}"""
 def _fix_action(action: Action, zones: list) -> Action:
     """
     Fixes common LLM mistakes:
-    1. Removes rescue/medical/food allocations to blocked zones that have no helicopter assigned.
+    1. Removes rescue/medical/food allocations to blocked zones with no helicopter.
     2. Auto-assigns helicopters to blocked zones that need help but were forgotten.
     3. Redirects wasted resources to open zones.
     """
     zone_map = {z["id"]: z for z in zones}
     helis = dict(action.deploy_helicopters)
 
-    # First pass: auto-assign helicopters to blocked zones that have allocations but no heli
     for zid, z in zone_map.items():
         blocked = z["access"] in ("road_blocked", "air_only")
         has_allocation = (
@@ -158,20 +157,16 @@ def _fix_action(action: Action, zones: list) -> Action:
             or action.send_medical.get(zid, 0) > 0
         )
         if blocked and has_allocation and zid not in helis:
-            # Find a zone that has an unnecessary helicopter or add one
             helis[zid] = 1
 
-    # Second pass: remove allocations to blocked zones still without a helicopter
     allocate_rescue = dict(action.allocate_rescue)
     send_medical    = dict(action.send_medical)
     send_food       = dict(action.send_food)
-
-    open_zones = [z["id"] for z in zones if z["access"] == "open"]
+    open_zones      = [z["id"] for z in zones if z["access"] == "open"]
 
     for zid, z in zone_map.items():
         blocked = z["access"] in ("road_blocked", "air_only")
         if blocked and zid not in helis:
-            # Rescue and medical wasted — redirect to most injured open zone
             wasted_rescue  = allocate_rescue.pop(zid, 0)
             wasted_medical = send_medical.pop(zid, 0)
             if open_zones and (wasted_rescue > 0 or wasted_medical > 0):
@@ -195,7 +190,7 @@ def rule_based_action(observation: dict) -> Action:
     Triage-based resource allocation.
     Never over-allocates. Sends helicopters to blocked zones first.
     """
-    zones    = observation.get("zones", [])
+    zones     = observation.get("zones", [])
     resources = observation.get("resources", {})
 
     rescue   = resources.get("rescue_teams", 0)
@@ -204,31 +199,27 @@ def rule_based_action(observation: dict) -> Action:
     helis    = resources.get("helicopters", 0)
     barriers = resources.get("flood_barriers", 0)
 
-    allocate_rescue = {}
-    send_food = {}
-    send_medical = {}
+    allocate_rescue    = {}
+    send_food          = {}
+    send_medical       = {}
     deploy_helicopters = {}
-    deploy_barriers = {}
-    evacuate = {}
+    deploy_barriers    = {}
+    evacuate           = {}
 
     sorted_zones = sorted(zones, key=lambda z: z["injured"], reverse=True)
-    n = max(len(sorted_zones), 1)
 
-    # Assign helicopters to blocked zones first
     for zone in sorted_zones:
         zid = zone["id"]
         if zone["access"] in ("road_blocked", "air_only") and helis > 0:
             deploy_helicopters[zid] = 1
             helis -= 1
 
-    # Count reachable zones for fair division
     reachable_zones = [
         z for z in sorted_zones
         if z["access"] == "open" or z["id"] in deploy_helicopters
     ]
     nr = max(len(reachable_zones), 1)
 
-    # Allocate remaining resources — only to reachable zones
     for zone in reachable_zones:
         zid = zone["id"]
 
@@ -247,14 +238,12 @@ def rule_based_action(observation: dict) -> Action:
             send_medical[zid] = share
             medical -= share
 
-    # Barriers go to highest-flood zones regardless of access
     for zone in sorted_zones:
         zid = zone["id"]
         if barriers > 0 and zone["flood_level"] >= 7:
             deploy_barriers[zid] = 1
             barriers -= 1
 
-    # Evacuate all zones
     for zone in sorted_zones:
         zid = zone["id"]
         can_evac = zone["population"] - zone["sheltered"]
@@ -323,7 +312,7 @@ async def run_task(client: OpenAI, task_module, task_name: str):
     finally:
         if hasattr(env, "close"):
             await env.close()
-        log_end(success=success, steps=steps_taken, score=score, rewards=rewards)
+        log_end(success=success, steps=steps_taken, rewards=rewards)
 
     return score
 

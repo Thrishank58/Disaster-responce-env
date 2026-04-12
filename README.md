@@ -125,8 +125,9 @@ Final episode score (0.0–1.0) combines:
 ## API
 
 ```
-POST /reset?task=easy|medium|hard   → initial observation
+\POST /reset?task=easy|medium|hard   → initial observation
 POST /step                          → next observation, reward, done, info
+POST /grade                         → final episode score (0.01–0.99)
 GET  /state                         → current observation
 GET  /health                        → {"status": "ok"}
 ```
