@@ -70,6 +70,15 @@ async def state():
     return {"observation": obs.model_dump()}
 
 
+@app.post("/grade")
+async def grade_endpoint():
+    from grader import grade
+    obs = await active_env.state()
+    raw = grade(obs.model_dump())
+    score = float(max(0.01, min(0.99, raw)))
+    return {"score": score}
+
+
 def main():
     import uvicorn
     uvicorn.run("server.app:app", host="0.0.0.0", port=7860, reload=False)
