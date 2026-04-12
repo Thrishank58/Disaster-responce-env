@@ -29,8 +29,8 @@ import tasks.medium as medium_task
 import tasks.hard as hard_task
 
 # ── ENV VARS ──────────────────────────────────────────────────────────────────
-API_BASE_URL = os.getenv("API_BASE_URL", "https://api.openai.com/v1")
-MODEL_NAME   = os.getenv("MODEL_NAME", "gpt-4.1-mini")
+API_BASE_URL = os.getenv("API_BASE_URL", "https://router.huggingface.co/v1")
+MODEL_NAME   = os.getenv("MODEL_NAME",   "Qwen/Qwen2.5-72B-Instruct")
 HF_TOKEN     = os.getenv("HF_TOKEN")
 
 if HF_TOKEN is None:
