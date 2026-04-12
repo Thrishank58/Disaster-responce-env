@@ -8,7 +8,7 @@ Scoring dimensions (all 0.0–1.0, weighted):
   - equity            : worst-zone survival not far below average        (15%)
   - shelter_rate      : proportion of population successfully sheltered  (10%)
 
-Final score is clamped to [0.0, 1.0].
+Final score is clamped to (0.01, 0.99) — strictly between 0 and 1.
 """
 
 def grade(state: dict) -> float:
@@ -20,19 +20,17 @@ def grade(state: dict) -> float:
     total_casualties = state.get("total_casualties", 0)
 
     if total_population == 0:
-        return 0.0
+        return 0.01
 
     # ── Survival rate ────────────────────────────────────────────────────────
     survival_rate = 1.0 - (total_injured / total_population)
     survival_rate = max(0.0, survival_rate)
 
     # ── Casualty control (cumulative fatalities penalised) ───────────────────
-    # If casualties > 5% of total pop → starts hurting the score
     casualty_ratio = total_casualties / total_population
     casualty_score = max(0.0, 1.0 - casualty_ratio * 5)
 
     # ── Flood control ────────────────────────────────────────────────────────
-    # Average flood level: score 1.0 if avg <= 5, 0.0 if avg >= 10
     avg_flood = sum(z["flood_level"] for z in zones) / len(zones)
     flood_score = max(0.0, 1.0 - (avg_flood - 5) / 5) if avg_flood > 5 else 1.0
 
@@ -40,7 +38,6 @@ def grade(state: dict) -> float:
     zone_survival = [1.0 - (z["injured"] / z["population"]) for z in zones]
     worst_zone_survival = min(zone_survival)
     avg_zone_survival   = sum(zone_survival) / len(zone_survival)
-    # Equity: how close the worst zone is to the average
     equity = worst_zone_survival / max(avg_zone_survival, 0.01)
     equity = min(1.0, equity)
 
@@ -56,4 +53,4 @@ def grade(state: dict) -> float:
         shelter_rate   * 0.10
     )
 
-    return round(max(0.0, min(1.0, score)), 4)
+    return round(max(0.01, min(0.99, score)), 4)

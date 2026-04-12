@@ -303,7 +303,7 @@ async def run_task(client: OpenAI, task_module, task_name: str):
 
         final_state = result["observation"].model_dump()
         score   = grade(final_state)
-        score   = max(0.0, min(1.0, score))
+        score   = max(0.01, min(0.99, score))
         success = score >= 0.5
 
     except Exception as e:
