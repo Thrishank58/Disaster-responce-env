@@ -42,7 +42,14 @@ def grade(state: dict) -> float:
     equity = min(1.0, equity)
 
     # ── Shelter rate ─────────────────────────────────────────────────────────
-    shelter_rate = total_sheltered / total_population
+    shelter_rate = min(1.0, total_sheltered / total_population)
+
+    # ── Clamp all sub-scores to [0, 1] before weighting ──────────────────────
+    survival_rate  = max(0.0, min(1.0, survival_rate))
+    casualty_score = max(0.0, min(1.0, casualty_score))
+    flood_score    = max(0.0, min(1.0, flood_score))
+    equity         = max(0.0, min(1.0, equity))
+    shelter_rate   = max(0.0, min(1.0, shelter_rate))
 
     # ── Weighted final score ─────────────────────────────────────────────────
     score = (
@@ -53,5 +60,6 @@ def grade(state: dict) -> float:
         shelter_rate   * 0.10
     )
 
+    # Strictly between 0 and 1 — never exactly 0.0 or 1.0
     return round(max(0.01, min(0.99, score)), 4)
 # fix

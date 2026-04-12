@@ -74,11 +74,15 @@ async def state():
 async def grade_endpoint():
     from grader import grade
     import json
+    # Auto-reset if env was never initialised (state_data is None)
+    if active_env.state_data is None:
+        await active_env.reset()
     obs = await active_env.state()
     # Force full JSON serialization to ensure plain dicts/lists
     raw_dict = json.loads(obs.model_dump_json())
     raw = grade(raw_dict)
-    score = float(max(0.01, min(0.99, raw)))
+    # Strict exclusive bounds: (0.01, 0.99) — never exactly 0.0 or 1.0
+    score = float(max(0.01, min(0.99, float(raw))))
     return {"score": score}
 
 
